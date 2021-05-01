@@ -22,13 +22,15 @@ b # e  = fAppAC Union [b,e]
 (+:) :: Ord a => Term a -> Term a -> Term a
 b +: e = fAppAC Xor [b,e]
 
-adec, aenc, sdec, senc, sign, revealSign, rep, check_rep:: (Term a,Term a) -> Term a
+adec, aenc, sdec, senc, sign, revealSign, rep, check_rep, wsdec, wsenc:: (Term a,Term a) -> Term a
 adec (a,b)       = fAppNoEq adecSym [a,b]
 aenc (a,b)       = fAppNoEq aencSym [a,b]
 sdec (a,b)       = fAppNoEq sdecSym [a,b]
 senc (a,b)       = fAppNoEq sencSym [a,b]
 sign (a,b)       = fAppNoEq signSym [a,b]
 revealSign (a,b) = fAppNoEq revealSignSym [a,b]
+wsdec (a, b)     = fAppNoEq wsdecSym [a,b]
+wsenc (a, b)     = fAppNoEq wsencSym [a,b]
 rep (a,b)        = fAppNoEq repSym [a,b]
 check_rep (a,b)        = fAppNoEq checkRepSym [a,b]
 

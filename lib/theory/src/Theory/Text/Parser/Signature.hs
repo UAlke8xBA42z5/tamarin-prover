@@ -65,6 +65,8 @@ builtins thy0 =do
           *> extendSig xorMaudeSig
       , try (symbol "symmetric-encryption")
           *> extendSig symEncMaudeSig
+      , try (symbol "weak-symmetric-encryption")
+          *> extendSig weakSymEncMaudeSig
       , try (symbol "asymmetric-encryption")
           *> extendSig asymEncMaudeSig
       , try (symbol "signing")
@@ -97,6 +99,8 @@ diffbuiltins =
           *> extendSig xorMaudeSig
       , try (symbol "symmetric-encryption")
           *> extendSig symEncMaudeSig
+      , try (symbol "weak-symmetric-encryption")
+          *> extendSig weakSymEncMaudeSig
       , try (symbol "asymmetric-encryption")
           *> extendSig asymEncMaudeSig
       , try (symbol "signing")

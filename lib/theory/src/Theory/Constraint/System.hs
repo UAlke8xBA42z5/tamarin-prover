@@ -196,7 +196,7 @@ module Theory.Constraint.System (
 
   ) where
 
--- import           Debug.Trace
+import           Debug.Trace
 -- import           Debug.Trace.Ignore
 
 import           Prelude                              hiding (id, (.))
@@ -230,6 +230,7 @@ import           Theory.Constraint.Solver.Heuristics
 import           Theory.Model
 import           Theory.Text.Pretty
 import           Theory.Tools.EquationStore
+import           Term.Builtin.Signature
 
 ----------------------------------------------------------------------
 -- ClassifiedRules
@@ -635,6 +636,35 @@ getOppositeRules ctxt side (Rule rule prem _ _ _) = case rule of
         (ConstrRule x) | x == BC.pack "_xor"      -> (xorRuleInstance (length prem)):
                                                             (concat $ map (destrRuleToConstrRule (AC Xor) (length prem)) (intruderRuleWithName (getAllRulesOnOtherSide ctxt side) (DestrRule x 0 False False)))
         (DestrRule x l s c) | x == BC.pack "_xor" -> (constrRuleToDestrRule (xorRuleInstance (length prem)) l s c)++(concat $ map destrRuleToDestrRule (intruderRuleWithName (getAllRulesOnOtherSide ctxt side) i))
+        (DestrRule x l s c) | x == BC.pack "_0_wsdec" ->
+         {- trace ("debug " ++ show(x) ++ ":\n"
+                ++ "\tprem: " ++ show(prem) ++ "\n"
+                ++ "\tdecSuccRule: " ++ show(decSuccRule) ++ "\n"
+                ++ "\tdecFailRule: " ++ show(decFailRule)) $ -}
+            decSuccRule ++ decFailRule
+          where
+            decSuccRule = (intruderRuleWithName (getAllRulesOnOtherSide ctxt side) i)
+            decFailRule = map (\r -> constrRuleToOneDestrRule r l s c) constrDecRules
+            constrDecRules = (intruderRuleWithName (getAllRulesOnOtherSide ctxt side) (ConstrRule (BC.pack "_wsdec")))
+        (ConstrRule x) | x == BC.pack "_wsenc" ->
+         {- trace ("debug " ++ show(x) ++ ":\n"
+                ++ "\tprem: " ++ show(prem) ++ "\n"
+                ++ "\tencRule: " ++ show(encRule) ++ "\n"
+                ++ "\tencFailDecRule: " ++ show(encFailDecRule)) $ -}
+            encRule ++ encFailDecRule
+          where
+            encRule = (intruderRuleWithName (getAllRulesOnOtherSide ctxt side) i)
+            encFailDecRule = map (\r -> destrRuleToOneConstrRule (NoEq wsencSym) (length prem) r) destrEncRules
+            destrEncRules = (intruderRuleWithName (getAllRulesOnOtherSide ctxt side) (DestrRule (BC.pack "_0_wsenc") 0 True False))
+        -- NOTE: this only makes sense in context for offline brute-force analysis. Try to isolate it.
+        (DestrRule x l s c) | x == BC.pack "_exp" ->
+         {- trace ("debug " ++ show(x) ++ ":\n"
+                ++ "\tdestrExpRule: " ++ show(destrExpRules)) $ -}
+            standardRules ++ destrExpRules
+          where
+            standardRules = intruderRuleWithName (getAllRulesOnOtherSide ctxt side) i
+            destrExpRules  = [constrRuleToOneDestrRule constrExpRule l s c]
+            constrExpRule = head (intruderRuleWithName (getAllRulesOnOtherSide ctxt side) (ConstrRule (BC.pack "_exp")))
         _                                         -> case intruderRuleWithName (getAllRulesOnOtherSide ctxt side) i of
                                                             [] -> error $ "No other rule found for intruder rule " ++ show i ++ show (getAllRulesOnOtherSide ctxt side)
                                                             x  -> x
@@ -864,13 +894,16 @@ getMirrorDGandEvaluateRestrictions dctxt dsys isSolved =
 -- Returns Just True if all hold, Just False if at least one does not hold and Nothing otherwise.
 doRestrictionsHold :: ProofContext -> System -> [LNGuarded] -> Bool -> (Trivalent, [System])
 doRestrictionsHold _    sys []       _        = (TTrue, [sys])
-doRestrictionsHold ctxt sys formulas isSolved = -- Just (True, [sys]) -- FIXME Jannik: This is a temporary simulation of diff-safe restrictions!
-  if (all (\(x, _) -> x == gtrue) simplifiedForms)
+doRestrictionsHold ctxt sys formulas' isSolved = -- Just (True, [sys]) -- FIXME Jannik: This is a temporary simulation of diff-safe restrictions!
+  if (null formulas)
+     then (TTrue, [sys])
+  else if (all (\(x, _) -> x == gtrue) simplifiedForms)
     then {-trace ("doRestrictionsHold: True " ++ (render. vsep $ map (prettyGuarded) formulas) ++ " - " ++ (render. vsep $ map (\(x, _) -> prettyGuarded x) simplifiedForms) ++ " - " ++ (render $ prettySystem sys))-} (TTrue, map snd simplifiedForms)
     else if (any (\(x, _) -> x == gfalse) simplifiedForms)
           then {-trace ("doRestrictionsHold: False " ++ (render. vsep $ map (prettyGuarded) formulas) ++ " - " ++ (render. vsep $ map (\(x, _) -> prettyGuarded x) simplifiedForms))-} (TFalse, map snd $ filter (\(x, _) -> x == gfalse) simplifiedForms)
           else {-trace ("doRestrictionsHold: Unkown " ++ (render. vsep $ map (prettyGuarded) formulas) ++ " - " ++ (render. vsep $ map (\(x, _) -> prettyGuarded x) simplifiedForms))-} (TUnknown, [sys])
   where
+    formulas = filter (not . isTrivialFormula) formulas'
     simplifiedForms = simplify (map (\x -> (x, sys)) formulas) isSolved
 
     simplify :: [(LNGuarded, System)] -> Bool -> [(LNGuarded, System)]

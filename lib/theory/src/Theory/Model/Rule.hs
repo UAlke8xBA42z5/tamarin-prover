@@ -108,7 +108,9 @@ module Theory.Model.Rule (
   , getLeftRule
   , getRightRule
   , constrRuleToDestrRule
+  , constrRuleToOneDestrRule
   , destrRuleToConstrRule
+  , destrRuleToOneConstrRule
   , destrRuleToDestrRule
 
   -- ** Construction
@@ -516,6 +518,17 @@ constrRuleToDestrRule (Rule (IntrInfo (ConstrRule name)) ps' cs _ _) i s c
         toRule (p:ps) = Rule (IntrInfo (DestrRule name i s c)) ((convertKUtoKD p):ps) (map convertKUtoKD cs) [] []
 constrRuleToDestrRule _ _ _ _ = error "Not a destructor rule."
 
+-- | Converts between one constructor and one destructor rule
+constrRuleToOneDestrRule :: RuleAC -> Int -> Bool -> Bool -> RuleAC
+constrRuleToOneDestrRule (Rule (IntrInfo (ConstrRule name)) ps' cs _ _) i s c
+    -- we remove the actions and new variables as destructors do not have actions or new variables
+    = toRule ps'
+    where
+        toRule :: [LNFact] -> RuleAC
+        toRule []     = error "Bug in constrRuleToDestrRule. Please report."
+        toRule (p:ps) = Rule (IntrInfo (DestrRule name i s c)) ((convertKUtoKD p):ps) (map convertKUtoKD cs) [] []
+constrRuleToOneDestrRule _ _ _ _ = error "Not a destructor rule."
+
 -- | Converts between destructor and constructor rules.
 destrRuleToConstrRule :: FunSym -> Int -> RuleAC -> [RuleAC]
 destrRuleToConstrRule f l (Rule (IntrInfo (DestrRule name _ _ _)) ps cs _ _)
@@ -537,6 +550,29 @@ destrRuleToConstrRule f l (Rule (IntrInfo (DestrRule name _ _ _)) ps cs _ _)
 
         newvars = map (var "z") [1..(toInteger $ l-(length ps))]
 destrRuleToConstrRule _ _ _ = error "Not a constructor rule."
+
+-- | Converts between one destructor and constructor rules.
+destrRuleToOneConstrRule :: FunSym -> Int -> RuleAC -> RuleAC
+destrRuleToOneConstrRule _ _ (Rule (IntrInfo (DestrRule name _ _ _)) ps cs _ _)
+    = toRule (map convertKDtoKU ps) (map convertKDtoKU cs)
+    where
+        -- we add the conclusion as an action as constructors have this action
+        toRule :: [LNFact] -> [LNFact] -> RuleAC
+        toRule ps' cs' = Rule (IntrInfo (ConstrRule name)) ps' cs' cs' []
+
+--         conclusions [] = []
+--         -- KD and KU facts only have one term
+--         conclusions ((Fact KDFact ann (m:ms)):cs') = (Fact KUFact ann ((addTerms m):ms)):(conclusions cs')
+--         conclusions                    (c:cs') =                               c:(conclusions cs')
+
+--         addTerms (FAPP f' t) | f'==f = fApp f (t ++ newvars)
+--         addTerms  t                  = fApp f (t:newvars)
+
+--         kuFacts = map kuFact newvars
+
+--         newvars = map (var "z") [1..(toInteger $ l-(length ps))]
+destrRuleToOneConstrRule _ _ _ = error "Not a constructor rule."
+
 
 -- | Creates variants of a destructor rule, where KD and KU facts are permuted.
 destrRuleToDestrRule :: RuleAC -> [RuleAC]
