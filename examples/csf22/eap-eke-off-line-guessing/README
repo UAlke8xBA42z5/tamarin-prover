@@ -1,0 +1,4 @@
+Branch: off-line-guessing
+Oracle: --heuristic=O --oraclename=equiv/eap-eke-off-line-guessing.oracle
+Command: /usr/bin/time -p ~/.local/bin/tamarin-prover --diff --heuristic=O --oraclename=equiv/eap-eke-off-line-guessing.oracle --prove="*" equiv/eap-eke-off-line-guessing.spthy +RTS -M23G -RTS >/tmp/eap-eke-off-line-guessing-proof.spthy
+

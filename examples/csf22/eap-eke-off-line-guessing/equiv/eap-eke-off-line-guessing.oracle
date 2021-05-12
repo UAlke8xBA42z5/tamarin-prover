@@ -1,0 +1,46 @@
+#!/usr/bin/python
+
+import re
+import os
+import sys
+
+
+lines = sys.stdin.readlines()
+lemma = sys.argv[1]
+
+# INPUT:
+# - lines contain a list of "%i:goal" where "%i" is the index of the goal
+# - lemma contain the name of the lemma under scrutiny
+# OUTPUT:
+# - (on stdout) a list of ordered index separated by EOL
+
+prios = []
+maxPrios = 100
+for i in range(0, maxPrios):
+    prios.append([])
+
+# With the default OE heuristic, rules: Rule_Destrd_0_fst, Rule_Destrd_0_snd,
+# Rule_Destrd_0_sdec, which do not have any mirrors, get stuck in an infinite
+# loop. For this reason, we use the following oracle.
+
+# For the rules: Rule_Equality
+if lemma == "Observational_equivalence":
+    for line in lines :
+        num = line.split(':')[0]
+        if re.match('.*!KU\( [a-zA-Z_]+(\.[0-9]+)? \)', line):
+            prios[90].append(num)
+        elif re.match('.*~~>.*', line):
+            prios[10].append(num)
+        elif re.match('.*!KU\( ~.*', line):
+            prios[15].append(num)
+        elif re.match('.*splitEqs\(*', line):
+            prios[20].append(num)
+        else:
+            prios[70].append(num)
+else:
+    exit(0)
+
+
+for prio in prios:
+  for goal in prio:
+      print(goal)

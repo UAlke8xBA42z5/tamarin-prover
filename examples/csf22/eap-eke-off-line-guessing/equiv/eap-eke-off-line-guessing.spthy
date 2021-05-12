@@ -1,0 +1,243 @@
+theory EAP_EKE_off_line_guessing begin
+
+builtins: weak-symmetric-encryption, diffie-hellman, symmetric-encryption
+
+rule GeneratePassword:
+    [ Fr(~pass)
+    ]
+  --[ // Learning phase
+      PhaseLearning()
+    ]->
+    [ !ClientPassword($C, $S, ~pass)
+      // Note that allowing the !ServerPassword($S, $C, ~pass) causes
+      // infinite 'ServerCommitResponse' regress!
+    , ServerPassword($S, $C, ~pass)
+    , ServerPassword($S, $C, ~pass)
+    , Challenge(~pass)
+    ]
+
+
+rule ClientIdRequest:
+let
+    id_c = 'ID_C'
+in
+    [ !ClientPassword($C, $S, ~pass)
+    , Fr(~tid)
+    ]
+  --[ // Client is running
+      Create($C, ~tid)
+      // Session initiated
+    , ClientSessionInitiated(~tid)
+      // Learning phase
+    , PhaseLearning()
+    ]->
+    [ StateClientIdRequest(~tid, $C, $S, ~pass)
+    , Out(<$C, id_c>)
+    , Challenge(~pass)
+    ]
+
+rule ServerIdResponse:
+let
+    id_c = 'ID_C'
+    id_s = 'ID_S'    
+    client_id_request = <$C, id_c>
+    server_id_response = <$S, id_s>
+in
+    [ ServerPassword($S, $C, ~pass)
+    , Fr(~tid)
+    , In(client_id_request)
+    ]
+  --[ Create($S, ~tid)
+      // Learning phase
+    , PhaseLearning()
+    , ServerSessionInitiated(~tid, ~pass)
+    ]->
+    [ StateServerIdResponse(~tid, $S, $C, ~pass)
+    , Out(server_id_response)
+    , Challenge(~pass)
+    ]
+
+rule ClientCommitRequest:
+let
+    id_s = 'ID_S'    
+    y_c = 'g'^~x_c
+    server_id_response = <S, id_s>
+    client_commit_request = wsenc(y_c, pass)
+in
+    [ StateClientIdRequest(tid, C, S, pass)
+    , Fr(~x_c)
+    , In(server_id_response)
+    ]
+  --[ ClientCommitRequest(tid, C, S, pass, ~x_c, y_c)
+      // Old stuff
+    , StartWsenc(client_commit_request)
+      // Learning phase
+    , PhaseLearning()
+    ]->
+    [ StateClientCommitRequest(tid, C, S, pass, ~x_c, y_c)
+    , Out(client_commit_request)
+    , Challenge(pass)
+    ]
+
+rule ServerCommitResponse:
+let
+    y_c = wsdec(client_commit_request, pass)
+    y_s = 'g'^~x_s
+    key = y_c^~x_s
+    scr_fst = wsenc(y_s, pass)
+    scr_snd = senc(~nonce_s, key)
+    scr = <scr_fst, scr_snd>
+
+in
+    [ StateServerIdResponse(tid, S, C, pass)
+    , In(client_commit_request)
+    , Fr(~x_s)
+    , Fr(~nonce_s)
+    ]
+  --[ // Open chains
+      OutServerCommitResponseNonce(scr)
+      // Auxiliary
+    , ServerCommitResponse(tid)
+    , ServerCommitResponseDetails(tid, S, C, pass, ~x_s, y_s, ~nonce_s, key, y_c)
+      // Learning phase
+    , PhaseLearning()
+      // Induction
+    , LoopWsenc(client_commit_request, scr)
+      // , ServerCommitResponseStartNonce(scr_snd)
+    , ServerCommitResponseStartNonce(scr)
+    ]->
+    [ StateServerCommitResponse(tid, S, C, pass, ~x_s, y_s, ~nonce_s, key, y_c)
+    , Out(scr_fst)
+    , Out(scr_snd)
+    , Challenge(pass)
+    ]
+
+
+rule ClientConfirmRequest:
+let
+    y_s = wsdec(scr_0, pass)
+    key = y_s^x_c
+
+    scr_1 = senc(nonce_s, key)
+    scr = <scr_0, scr_1>
+    client_confirm_request = senc(<nonce_s, ~nonce_p>, key)
+in
+    [ StateClientCommitRequest(tid, C, S, pass, x_c, y_c)
+    , Fr(~nonce_p)
+    , In(scr_0)
+    , In(scr_1)
+    ]
+  --[ // Old stuff
+      InClientConfirmRequestNonce(nonce_s, scr)
+    , OutClientConfirmRequestNonce(client_confirm_request)
+      , StopWsenc(scr)
+
+      // Server S has been running as responder apparently with client C as initiator
+    , Running(S, C, <'responder', ~nonce_p, nonce_s>)
+      // Auxiliary
+    , ClientConfirmRequest(tid)
+      // , Commit(C, S, <'C', 'S', ~nonce_p, nonce_s>)
+    , ConfirmRequest(tid, C, S, pass, x_c, y_c, ~nonce_p,nonce_s,key)
+      // Learning phase
+    , PhaseLearning()
+      // Open chains
+    , ClientConfirmRequestLoopNonces(scr, client_confirm_request)
+    , ClientConfirmRequestStartNonce(client_confirm_request)
+    ]->
+    [ StateClientConfirmRequest_1(tid, C, S, pass, x_c, y_c, scr_0, y_s, key, ~nonce_p, nonce_s, scr_1)
+    , Out(client_confirm_request)
+    , Challenge(pass)
+    ]
+
+rule ServerConfirmResponse:
+let
+    client_confirm_request = senc(<nonce_s, nonce_p>, key)
+
+    server_confirm_response = senc(nonce_p, key)
+in
+    [ StateServerCommitResponse(tid, S, C, pass, x_s, y_s, nonce_s, key, y_c)
+    , In(client_confirm_request)
+    ]
+  --[ // Open chains
+      InServerConfirmResponseNonce(nonce_p, client_confirm_request)
+      // Server S has been running as responder apparently with client C as initiator
+    , Running(C, S, <'initiator', nonce_p, nonce_s>)
+      // Run ended for S as a responder
+    , Commit(S, C, <'responder', nonce_p, nonce_s>)
+    , CommitServer(S, C, 'responder', nonce_p, nonce_s)
+      // Honest agents
+    , Honest(S)
+    , Honest(C)
+      // Secret key
+    , Secret(key)
+      // Auxiliary
+    , ServerConfirmResponse(tid)
+      // Learning phase
+    , PhaseLearning()
+    // Induction
+    , ServerConfirmResponseLoopNonces(client_confirm_request, server_confirm_response)
+    ]->
+    [ Out(server_confirm_response)
+    , Challenge(pass)
+    ]
+
+rule ClientSessionEstablishment:
+let
+    server_confirm_response = senc(nonce_p, key)
+in
+    [ StateClientConfirmRequest_1(tid, C, S, pass, x_c, y_c, scr_0, y_s, key, nonce_p, nonce_s, scr_1)
+    , In(server_confirm_response)
+    ]
+  --[ // Run ended for C as initiator
+      Commit(C, S, <'initiator', nonce_p, nonce_s>)
+    , CommitClient(C, S, 'initiator', nonce_p, nonce_s)
+      // Honest agents
+    , Honest(C)
+    , Honest(S)
+      // Secret key
+    , Secret(key)
+      // Auxiliary
+    , ClientSessionEstablishment(tid)
+    // Learning phase
+    , PhaseLearning()
+    ]->
+    [ Challenge(pass)
+    ]
+
+rule ChallengeAttacker:
+    [ Challenge(~pass)
+    , Fr(~fake_pass)
+    ]
+  --[ // Guessing phase
+      PhaseGuessing()
+      // This disables trivial Rule_Equality false attack which happens because
+      // [!KD(pass),!KU(pass)]-->[] holds, but
+      // [!KD(fake_pass),!KU(fake_pass)]-->[] does not
+    , UniqueGuess()
+    ]->
+    [
+      Out(diff(~pass, ~fake_pass))
+    ]
+
+lemma StartBeforeLoopNonces [sources, diff_reuse, reuse]:
+  " ( All x y #j. ClientConfirmRequestLoopNonces(x,y) @ j ==>
+      (Ex #i. ServerCommitResponseStartNonce(x) @ i & i < j )
+    )
+  & ( All x y #j. ServerConfirmResponseLoopNonces(x,y) @ j ==>
+      (Ex #i. ClientConfirmRequestStartNonce(x) @ i & i < j)
+    )
+  "
+
+lemma executable:
+    exists-trace
+    "Ex C S nc ns #i #j.
+     CommitClient(C, S, 'initiator', nc, ns)@i &
+     CommitServer(S, C, 'responder', nc, ns)@j"
+
+restriction learnBeforeGuess:
+    "All #i #j. PhaseLearning()@i & PhaseGuessing()@j ==> (#i < #j) "
+
+restriction uniqueGuess:
+    "All #i #j. UniqueGuess()@#i & UniqueGuess()@#j ==> (#i = #j)"
+
+end

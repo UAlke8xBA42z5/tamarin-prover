@@ -1,0 +1,247 @@
+theory EAP_EKE_trace_tagged begin
+
+builtins: weak-symmetric-encryption, diffie-hellman, symmetric-encryption
+
+rule GeneratePassword:
+    [ Fr(~pass)
+    ]
+  --[ // Learning phase
+      PhaseLearning()
+    ]->
+    [
+      !ClientPassword($C, $S, ~pass)
+    , !ServerPassword($S, $C, ~pass)
+    , RevealPass($C, $S, ~pass)
+    ]
+
+rule RevealPassword:
+    [ RevealPass($C, $S, ~pass)
+    ]
+  --[ RevPass($C, $S)
+    , RevAgentPass($C)
+    , RevAgentPass($S)
+    ]->
+    [ Out(~pass)
+    ]
+
+
+rule ClientIdRequest:
+let
+    id_c = 'ID_C'
+in
+    [ !ClientPassword($C, $S, ~pass)
+    , Fr(~tid)
+    ]
+  --[ // Client is running
+      Create($C, ~tid)
+      // Learning phase
+    , PhaseLearning()
+    ]->
+    [ StateClientIdRequest(~tid, $C, $S, ~pass)
+    , Out(<$C, id_c>)
+    ]
+
+rule ServerIdResponse:
+let
+    id_c = 'ID_C'
+    id_s = 'ID_S'
+    client_id_request = <$C, id_c>
+    server_id_response = <$S, id_s>
+in
+    [ !ServerPassword($S, $C, ~pass)
+    , Fr(~tid)
+    , In(client_id_request)
+    ]
+  --[ Create($S, ~tid)
+      // Learning phase
+    , PhaseLearning()
+    ]->
+    [ StateServerIdResponse(~tid, $S, $C, ~pass)
+    , Out(server_id_response)
+    ]
+
+rule ClientCommitRequest:
+let
+    id_s = 'ID_S'
+    y_c = 'g'^~x_c
+    server_id_response = <S, id_s>
+    client_commit_request = wsenc(y_c, pass)
+in
+    [ StateClientIdRequest(tid, C, S, pass)
+    , Fr(~x_c)
+    , In(server_id_response)
+    ]
+  --[ // Learning phase
+      PhaseLearning()
+    ]->
+    [ StateClientCommitRequest(tid, C, S, pass, ~x_c, y_c)
+    , Out(client_commit_request)
+    ]
+
+rule ServerCommitResponse:
+let
+    y_c = wsdec(client_commit_request, pass)
+    y_s = 'g'^~x_s
+    key = y_c^~x_s
+    scr_fst = wsenc(y_s, pass)
+    scr_snd = senc(<'1', ~nonce_s>, key)
+    scr = <scr_fst, scr_snd>
+
+in
+    [ StateServerIdResponse(tid, S, C, pass)
+    , In(client_commit_request)
+    , Fr(~x_s)
+    , Fr(~nonce_s)
+    ]
+  --[ // Open chains
+      OutServerCommitResponseNonce(scr_snd)
+      // Learning phase
+    , PhaseLearning()
+    ]->
+    [ StateServerCommitResponse(tid, S, C, pass, ~x_s, y_s, ~nonce_s, key, y_c)
+    , Out(scr_fst)
+    , Out(scr_snd)
+    ]
+
+
+rule ClientConfirmRequest:
+let
+    y_s = wsdec(scr_0, pass)
+    key = y_s^x_c
+
+    scr_1 = senc(<'1', nonce_s>, key)
+    scr = <scr_0, scr_1>
+    client_confirm_request = senc(<'2', nonce_s, ~nonce_p>, key)
+in
+    [ StateClientCommitRequest(tid, C, S, pass, x_c, y_c)
+    , Fr(~nonce_p)
+    , In(scr_0)
+    , In(scr_1)
+    ]
+  --[ // Open chains
+      InClientConfirmRequestNonce(nonce_s, scr_1)
+    , OutClientConfirmRequestNonce(client_confirm_request)
+      // Server S has been running as responder apparently with client C as initiator
+    , Running(S, C, <'responder', ~nonce_p, nonce_s>)
+      // Auxiliary
+    , ClientConfirmRequest(tid)
+      // , Commit(C, S, <'C', 'S', ~nonce_p, nonce_s>)
+    , ConfirmRequest(tid, C, S, pass, x_c, y_c, ~nonce_p,nonce_s,key)
+      // Learning phase
+    , PhaseLearning()
+    ]->
+    [ StateClientConfirmRequest_1(tid, C, S, pass, x_c, y_c, scr_0, y_s, key, ~nonce_p, nonce_s, scr_1)
+    , Out(client_confirm_request)
+    ]
+
+rule ServerConfirmResponse:
+let
+    client_confirm_request = senc(<'2', nonce_s, nonce_p>, key)
+
+    server_confirm_response = senc(<'3', nonce_p>, key)
+in
+    [ StateServerCommitResponse(tid, S, C, pass, x_s, y_s, nonce_s, key, y_c)
+    , In(client_confirm_request)
+    ]
+  --[ // Open chains
+      InServerConfirmResponseNonce(nonce_p, client_confirm_request)
+      // Server S has been running as responder apparently with client C as initiator
+    , Running(C, S, <'initiator', nonce_p, nonce_s>)
+      // Run ended for S as a responder
+    , Commit(S, C, <'responder', nonce_p, nonce_s>)
+    , CommitServer(S, C, 'responder', nonce_p, nonce_s)
+      // Honest agents
+    , Honest(S)
+    , Honest(C)
+      // Secret key
+    , Secret(key)
+      // Auxiliary
+    , ServerConfirmResponse(tid)
+      // Learning phase
+    , PhaseLearning()
+    ]->
+    [ Out(server_confirm_response)
+    ]
+
+rule ClientSessionEstablishment:
+let
+    server_confirm_response = senc(<'3', nonce_p>, key)
+in
+    [ StateClientConfirmRequest_1(tid, C, S, pass, x_c, y_c, scr_0, y_s, key, nonce_p, nonce_s, scr_1)
+    , In(server_confirm_response)
+    ]
+  --[ // Run ended for C as initiator
+      Commit(C, S, <'initiator', nonce_p, nonce_s>)
+    , CommitClient(C, S, 'initiator', nonce_p, nonce_s)
+      // Honest agents
+    , Honest(C)
+    , Honest(S)
+      // Secret key
+    , Secret(key)
+      // Auxiliary
+    , ClientSessionEstablishment(tid)
+    // Learning phase
+    , PhaseLearning()
+    ]->
+    [
+    ]
+
+// Sources
+lemma SrcNonces [sources]:
+    " ( All nonce msg #i. InClientConfirmRequestNonce(nonce, msg)@i ==>
+          ( Ex #j. KU(nonce)@j & j < i )
+        | ( Ex #j. OutServerCommitResponseNonce(msg)@j )
+      )
+    & ( All nonce msg #i. InServerConfirmResponseNonce(nonce, msg)@i ==>
+          ( Ex #j. KU(nonce)@j & j < i )
+        | ( Ex #j. OutClientConfirmRequestNonce(msg)@j )
+      )
+    "
+
+// Aliveness
+lemma Aliveness:
+    "All A B t #i. Commit(A, B, t)@i ==>
+    ( (Ex tid #j. Create(B, tid)@j )
+    | (Ex #j. RevAgentPass(A)@j )
+    | (Ex #j. RevAgentPass(B)@j ) )"
+
+
+// Weak agreement
+lemma WeakAgreement:
+    "All A B t #i. Commit(A, B, t)@i ==>
+    ( ( Ex t2 #j. Running(A, B, t2)@j )
+    | ( Ex #j. RevAgentPass(A)@j )
+    | ( Ex #j. RevAgentPass(B)@j ) )"
+
+// Noninjective agreement
+lemma NonInjectiveAgreement:
+    "All A B t #i. Commit(A, B, t)@i ==>
+    ( ( Ex #j. Running(A, B, t)@j )
+    | ( Ex #j. RevAgentPass(A)@j )
+    | ( Ex #j. RevAgentPass(B)@j ) )"
+
+// Injective agreement
+lemma InjectiveAgreement:
+    "All A B t #i. Commit(A, B, t)@i ==>
+    ( ( Ex #j.
+        Running(A, B, t)@j &
+        (#j < #i) &
+        (All A1 B1 #k. Commit(A1, B1, t)@k ==> (#k = #i) ) )
+    | ( Ex #j. RevAgentPass(A)@j )
+    | ( Ex #j. RevAgentPass(B)@j ) )"
+
+// Perfect forward secrecy
+lemma PerfectForwardSecrecy:
+    " All key #i. Secret(key)@i ==>
+      not (Ex #j. KU(key)@j)
+    | (Ex A #k. RevAgentPass(A)@k & Honest(A)@i & (#k < #i))"
+
+// Executable
+lemma Executable:
+    exists-trace
+    "Ex #i C S nc ns #j.
+        CommitClient(C, S, 'initiator', nc, ns)@i &
+        CommitServer(S, C, 'responder', nc, ns)@j &
+        not ( Ex #k. RevPass(C, S)@k ) "
+
+end
