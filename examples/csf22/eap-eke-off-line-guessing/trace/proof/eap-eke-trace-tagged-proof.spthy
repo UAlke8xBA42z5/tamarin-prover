@@ -16301,12 +16301,6 @@ analyzed: trace/eap-eke-trace-tagged.spthy
 
 ==============================================================================
 
-Tamarin prover
-    Branch: 'https://github.com/UAlke8xBA42z5/tamarin-prover/tree/off-line-guessing',
-    Commit:  f8225ed540272b0ce770f61ae81fb9b6f3ad078e
-System: AMD Ryzen 5 2600X @ 3.6GHz, with 20GB of available RAM, running on the
-    Arch Linux, kernel version 5.11.16-arch1-1
-Time:
-    real 143.95
-    user 1048.52
-    sys 449.59
+real 143.95
+user 1048.52
+sys 449.59
