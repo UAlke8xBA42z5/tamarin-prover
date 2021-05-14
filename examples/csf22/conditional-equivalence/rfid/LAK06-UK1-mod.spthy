@@ -1,0 +1,99 @@
+theory LAK06_UK1_mod begin
+
+/*
+  This theory models LAK06 including the readers.
+  Model is taken from the Tamarin source code repository:
+  examples/features/xor/diff-models/CH07-UK1.spthy
+*/
+
+
+//
+// The key chaining as in actual LAK06 is NOT part of this model.
+//
+// This models specifies weak unlinkability [1] for two sessions of tag and
+// reader. Tamarin proves the absence of attack for such a model as claimed
+// [1].
+
+// [1] Attacks on RFID protocols" v1.1 from Aug 6, 2009, by Ton van Deursen and Sasa Radomirovic
+
+builtins: xor, hashing, multiset
+
+/*
+  R -> T: r0
+  T -> R: r1, h(r0 XOR r1 XOR k) 
+  R -> T: h(h(r0 XOR r1 XOR k) XOR k XOR r0)
+
+*/
+
+rule setup:
+   let id1 = ~k1
+       id2 = ~k2
+       idb = diff(~k1, ~k2)
+   in
+   [ Fr( ~k1 )
+   , Fr( ~k2 )
+   ]
+--[ OnlyOnce(), Create(~k1), Create(~k2) ]->
+   [  TagRun(id1, 'learning')
+    , ReaderRun(id1, 'learning')
+    , TagRun(id2, 'learning')
+    , ReaderRun(id2, 'learning')
+    , TagRun(idb, 'guessing')
+   ]
+
+rule initiatereader_learn:
+  [ ReaderRun(~k, 'learning'), Fr(~r0)]
+--[ PhaseLearning()]->
+  [ ReaderState1(~k, ~r0, 'learning'), Out(~r0) ]
+
+rule initiatereader_guess:
+  [ ReaderRun(~k, 'guessing'), Fr(~r0)]
+--[ PhaseGuessing()]->
+  [ ReaderState1(~k, ~r0, 'guessing'), Out(~r0) ]
+
+rule tag1_learn:
+  [ TagRun(~k, 'learning'), Fr(~r1), In(r0) ]
+  --[ Running(<'R','T',<~k,r0,~r1>>), PhaseLearning() ]->
+  [ TagState1(~k, ~r1, r0, 'learning'), Out(<~r1, h(r0 XOR ~r1 XOR ~k)>) ]
+
+rule tag1_guess:
+  [ TagRun(~k, 'guessing'), Fr(~r1), In(r0) ]
+  --[ Running(<'R','T',<~k,r0,~r1>>), PhaseGuessing() ]->
+  [ TagState1(~k, ~r1, r0, 'guessing'), Out(<~r1, h(r0 XOR ~r1 XOR ~k)>) ]
+
+rule acceptreader_learn:
+  [ ReaderState1(~k, ~r0, 'learning'), In(<r1, h(~r0 XOR r1 XOR ~k)>) ]
+--[ Commit(<'R','T',<~k,~r0,r1>>)
+  , Running(<'T','R',<~k,~r0,r1>>), PhaseLearning() ]->
+  [ Out(h(h(~r0 XOR r1 XOR ~k) XOR ~k XOR ~r0)) ]
+
+rule acceptreader_guess:
+  [ ReaderState1(~k, ~r0, 'guessing'), In(<r1, h(~r0 XOR r1 XOR ~k)>) ]
+--[ Commit(<'R','T',<~k,~r0,r1>>)
+  , Running(<'T','R',<~k,~r0,r1>>), PhaseGuessing() ]->
+  [ Out(h(h(~r0 XOR r1 XOR ~k) XOR ~k XOR ~r0)) ]
+
+rule accepttag_learn:
+  [ TagState1(~k, ~r1, r0, 'learning'), In(h(h(r0 XOR ~r1 XOR ~k) XOR ~k XOR r0)) ]
+--[ Commit(<'T','R',<~k,r0,~r1>>)
+  , FinTag(), PhaseLearning()]->
+  [ ]
+
+rule accepttag_guess:
+  [ TagState1(~k, ~r1, r0, 'guessing'), In(h(h(r0 XOR ~r1 XOR ~k) XOR ~k XOR r0)) ]
+--[ Commit(<'T','R',<~k,r0,~r1>>)
+  , FinTag(), PhaseGuessing()]->
+  [ ]
+
+restriction onylOnce:
+  "All #i1 #i2. OnlyOnce()@i1 & OnlyOnce()@i2 ==> #i1 = #i2"
+
+restriction complyWithPhase:
+  "All #i1 #i2. PhaseLearning()@i1 & PhaseGuessing()@i2 ==> #i1 < #i2"
+
+lemma executable:
+  exists-trace
+  " (Ex #i. FinTag()@i)
+  & (All #i1 #i2. OnlyOnce()@i1 & OnlyOnce()@i2 ==> #i1 = #i2)"
+
+end
